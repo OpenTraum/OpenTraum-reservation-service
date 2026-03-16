@@ -6,30 +6,22 @@ import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.LocalDateTime;
 
+@Table("reservation_seats")
 @Getter
 @Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table("reservations")
-public class Reservation {
+public class ReservationSeat {
 
     @Id
     private Long id;
 
-    private Long userId;
-    private Long scheduleId;
-    private Long tenantId;
-
-    private String grade;
-    private Integer quantity;
-
-    private Boolean needsConfirm;
-    private LocalDateTime confirmDeadline;
-
-    private String trackType;
+    private Long reservationId;
+    private Long seatId;
+    private String zone;
+    private String seatNumber;
     private String status;
-
+    private LocalDateTime assignedAt;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }
