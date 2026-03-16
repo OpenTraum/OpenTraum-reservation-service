@@ -49,4 +49,12 @@ public class RedisKeyGenerator {
     public static String stockKey(Long scheduleId, String grade) {
         return String.format("stock:%d:%s", scheduleId, grade);
     }
+
+    public static String seatPoolKey(Long scheduleId, String zone) {
+        return String.format("seat-pool:%d:%s", scheduleId, zone);
+    }
+
+    public static String holdKey(Long scheduleId, String zone, String seatNumber) {
+        return String.format("hold:%d:%s:%s", scheduleId, zone, seatNumber);
+    }
 }

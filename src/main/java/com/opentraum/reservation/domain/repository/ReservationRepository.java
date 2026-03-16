@@ -17,6 +17,12 @@ public interface ReservationRepository extends ReactiveCrudRepository<Reservatio
 
     Mono<Boolean> existsByUserIdAndScheduleId(Long userId, Long scheduleId);
 
+    @Query("SELECT CASE WHEN COUNT(*) > 0 THEN true ELSE false END FROM reservations " +
+           "WHERE user_id = :userId AND schedule_id = :scheduleId " +
+           "AND status IN (:s1, :s2, :s3, :s4)")
+    Mono<Boolean> existsByUserIdAndScheduleIdAndStatusIn(Long userId, Long scheduleId,
+                                                          String s1, String s2, String s3, String s4);
+
     Mono<Reservation> findFirstByUserIdAndScheduleIdAndTrackType(Long userId, Long scheduleId, String trackType);
 
     @Query("SELECT COALESCE(SUM(quantity), 0) FROM reservations " +

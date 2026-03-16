@@ -54,6 +54,8 @@ management:
 
 # Queue Properties
 opentraum:
+  event-service:
+    url: ${EVENT_SERVICE_URL:http://localhost:8083}
   queue:
     batch-size: 100
     max-active-users: 500
@@ -61,6 +63,8 @@ opentraum:
     heartbeat-ttl-seconds: 30
     token-ttl-seconds: 300
     active-timeout-seconds: 60
+    scheduler-interval-ms: 5000
+    cleanup-interval-ms: 10000
 
 # Swagger
 springdoc:
