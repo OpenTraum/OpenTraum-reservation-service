@@ -1,21 +1,50 @@
 package com.opentraum.reservation.domain.repository;
 
-import org.springframework.data.r2dbc.repository.R2dbcRepository;
-import org.springframework.stereotype.Repository;
-
+import com.opentraum.reservation.domain.dto.GradeReservedSum;
 import com.opentraum.reservation.domain.entity.Reservation;
-
+import org.springframework.data.r2dbc.repository.Query;
+import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-@Repository
-public interface ReservationRepository extends R2dbcRepository<Reservation, Long> {
+public interface ReservationRepository extends ReactiveCrudRepository<Reservation, Long> {
 
-    Flux<Reservation> findByUserIdAndEventId(Long userId, Long eventId);
+    Flux<Reservation> findByUserId(Long userId);
 
-    Flux<Reservation> findByEventIdAndTenantId(Long eventId, Long tenantId);
+    Flux<Reservation> findByUserIdAndScheduleIdAndTrackType(Long userId, Long scheduleId, String trackType);
 
-    Mono<Reservation> findByUserIdAndEventIdAndSeatId(Long userId, Long eventId, Long seatId);
+    Flux<Reservation> findByScheduleIdAndStatus(Long scheduleId, String status);
 
-    Flux<Reservation> findByTenantId(Long tenantId);
+    Mono<Boolean> existsByUserIdAndScheduleId(Long userId, Long scheduleId);
+
+    Mono<Reservation> findFirstByUserIdAndScheduleIdAndTrackType(Long userId, Long scheduleId, String trackType);
+
+    @Query("SELECT COALESCE(SUM(quantity), 0) FROM reservations " +
+           "WHERE schedule_id = :scheduleId AND grade = :grade AND track_type = 'LOTTERY' " +
+           "AND status IN ('PENDING', 'PAID_PENDING_SEAT')")
+    Mono<Long> sumLotteryQuantityByScheduleAndGrade(Long scheduleId, String grade);
+
+    @Query("SELECT COALESCE(SUM(quantity), 0) FROM reservations " +
+           "WHERE schedule_id = :scheduleId AND user_id = :userId AND track_type = 'LOTTERY' " +
+           "AND status IN ('PENDING', 'PAID_PENDING_SEAT')")
+    Mono<Long> sumLotteryQuantityByUserAndSchedule(Long scheduleId, Long userId);
+
+    @Query("SELECT COALESCE(SUM(quantity), 0) FROM reservations " +
+           "WHERE schedule_id = :scheduleId AND user_id = :userId AND track_type = 'LIVE' " +
+           "AND status IN ('PENDING', 'PAID_PENDING_SEAT', 'ASSIGNED')")
+    Mono<Long> sumLiveQuantityByUserAndSchedule(Long scheduleId, Long userId);
+
+    Flux<Reservation> findByScheduleIdAndTrackTypeAndStatus(Long scheduleId, String trackType, String status);
+
+    @Query("SELECT grade, COALESCE(SUM(quantity), 0) as total FROM reservations " +
+           "WHERE schedule_id = :scheduleId AND track_type = 'LOTTERY' " +
+           "AND status IN ('PENDING', 'PAID_PENDING_SEAT') GROUP BY grade")
+    Flux<GradeReservedSum> findLotteryReservedSumByScheduleIdGroupByGrade(Long scheduleId);
+
+    Mono<Reservation> findFirstByUserIdAndScheduleIdAndStatusOrderByCreatedAtDesc(Long userId, Long scheduleId, String status);
+
+    @Query("SELECT COALESCE(SUM(quantity), 0) FROM reservations " +
+           "WHERE schedule_id = :scheduleId AND grade = :grade AND track_type = 'LOTTERY' " +
+           "AND status = 'PAID_PENDING_SEAT'")
+    Mono<Long> sumLotteryPaidQuantityByScheduleAndGrade(Long scheduleId, String grade);
 }

@@ -37,6 +37,15 @@ dependencies {
     // Kafka (Event Consumption + Production)
     implementation 'org.springframework.kafka:spring-kafka'
 
+    // Redisson (Distributed Lock)
+    implementation 'org.redisson:redisson-spring-boot-starter:3.40.2'
+
+    // Validation
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // Swagger
+    implementation 'org.springdoc:springdoc-openapi-starter-webflux-ui:2.8.9'
+
     // Actuator + Prometheus (Monitoring)
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'

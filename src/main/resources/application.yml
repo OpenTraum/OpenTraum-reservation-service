@@ -52,6 +52,24 @@ management:
     tags:
       application: ${spring.application.name}
 
+# Queue Properties
+opentraum:
+  queue:
+    batch-size: 100
+    max-active-users: 500
+    max-queue-size: 100000
+    heartbeat-ttl-seconds: 30
+    token-ttl-seconds: 300
+    active-timeout-seconds: 60
+
+# Swagger
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+
 # Logging
 logging:
   level:
