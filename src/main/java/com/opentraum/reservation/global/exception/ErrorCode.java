@@ -38,6 +38,9 @@ public enum ErrorCode {
     CANCELLATION_NOT_AVAILABLE(HttpStatus.FORBIDDEN, "T008", "추첨/라이브 트랙이 모두 마감된 후에만 취소 신청이 가능합니다"),
     CANCELLATION_WINDOW_EXPIRED(HttpStatus.FORBIDDEN, "T009", "취소 가능 기간이 지났습니다"),
 
+    UNAUTHORIZED(HttpStatus.FORBIDDEN, "A001", "접근 권한이 없습니다"),
+    SEAT_HOLD_NOT_OWNED(HttpStatus.FORBIDDEN, "S006", "본인이 홀드한 좌석이 아닙니다"),
+
     LOCK_ACQUISITION_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "L001", "락 획득에 실패했습니다");
 
     private final HttpStatus status;
