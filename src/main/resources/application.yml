@@ -1,0 +1,60 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: opentraum-reservation-service
+
+  # R2DBC - PostgreSQL
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/opentraum_reservation
+    username: ${DB_USERNAME:opentraum}
+    password: ${DB_PASSWORD:opentraum}
+    pool:
+      initial-size: 5
+      max-size: 20
+      max-idle-time: 30m
+
+  # Redis (Queue / Distributed Lock)
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+  # Kafka
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: reservation-service-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    producer:
+      acks: all
+      retries: 3
+
+  # SQL Init
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+# Actuator + Prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# Logging
+logging:
+  level:
+    com.opentraum.reservation: DEBUG
+    org.springframework.r2dbc: DEBUG
+    org.springframework.data.redis: DEBUG
