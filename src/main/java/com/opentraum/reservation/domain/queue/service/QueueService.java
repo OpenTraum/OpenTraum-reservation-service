@@ -3,6 +3,7 @@ package com.opentraum.reservation.domain.queue.service;
 import com.opentraum.reservation.domain.queue.config.QueueProperties;
 import com.opentraum.reservation.domain.queue.dto.QueueEntryResponse;
 import com.opentraum.reservation.domain.queue.dto.QueueStatusResponse;
+import com.opentraum.reservation.domain.service.SeatPoolService;
 import com.opentraum.reservation.global.exception.BusinessException;
 import com.opentraum.reservation.global.exception.ErrorCode;
 import com.opentraum.reservation.global.util.RedisKeyGenerator;
@@ -26,6 +27,7 @@ public class QueueService {
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final QueueTokenService queueTokenService;
     private final QueueProperties queueProperties;
+    private final SeatPoolService seatPoolService;
 
     private RedisScript<Long> queueEnterScript;
 
@@ -54,27 +56,7 @@ public class QueueService {
                                         .estimatedWaitMinutes(calculateEstimatedWait(position))
                                         .message(String.format("이미 대기 중입니다. 현재 %d번째입니다", position)).build());
                             })
-                            .switchIfEmpty(Mono.defer(() -> {
-                                double score = System.currentTimeMillis();
-                                return redisTemplate.execute(queueEnterScript, List.of(queueKey),
-                                                List.of(String.valueOf(queueProperties.getMaxQueueSize()),
-                                                        userId.toString(), String.valueOf((long) score)))
-                                        .next()
-                                        .flatMap(result -> {
-                                            if (result == 0L) {
-                                                return Mono.error(new BusinessException(ErrorCode.QUEUE_FULL));
-                                            }
-                                            String heartbeatKey = RedisKeyGenerator.heartbeatKey(scheduleId, userId);
-                                            Duration heartbeatTtl = Duration.ofSeconds(queueProperties.getHeartbeatTtlSeconds());
-                                            return redisTemplate.opsForValue().set(heartbeatKey, "alive", heartbeatTtl)
-                                                    .then(redisTemplate.opsForSet().add(RedisKeyGenerator.activeSchedulesKey(), scheduleId.toString()))
-                                                    .then(getPosition(scheduleId, userId))
-                                                    .map(position -> QueueEntryResponse.builder()
-                                                            .scheduleId(scheduleId).userId(userId).position(position)
-                                                            .estimatedWaitMinutes(calculateEstimatedWait(position))
-                                                            .message(String.format("%d번째로 대기 중입니다", position)).build());
-                                        });
-                            }));
+                            .switchIfEmpty(Mono.defer(() -> tryDirectAdmitOrQueue(scheduleId, userId)));
                 });
     }
 
@@ -120,6 +102,67 @@ public class QueueService {
                         .flatMap(s -> redisTemplate.opsForZSet().add(activeKey, userId.toString(), now))
                         .defaultIfEmpty(false))
                 .thenReturn(true);
+    }
+
+    private Mono<QueueEntryResponse> tryDirectAdmitOrQueue(Long scheduleId, Long userId) {
+        String activeKey = RedisKeyGenerator.activeKey(scheduleId);
+
+        return Mono.zip(
+                redisTemplate.opsForZSet().size(activeKey).defaultIfEmpty(0L),
+                seatPoolService.getRemainingSeatsTotal(scheduleId)
+        ).flatMap(tuple -> {
+            long activeCount = tuple.getT1();
+            long remainingSeats = tuple.getT2();
+            long effectiveMaxActive = Math.min(remainingSeats, queueProperties.getMaxActiveUsers());
+
+            if (activeCount < effectiveMaxActive) {
+                return directAdmit(scheduleId, userId);
+            }
+            return enterQueueNormal(scheduleId, userId);
+        });
+    }
+
+    private Mono<QueueEntryResponse> directAdmit(Long scheduleId, Long userId) {
+        String activeKey = RedisKeyGenerator.activeKey(scheduleId);
+        double now = System.currentTimeMillis();
+        String heartbeatKey = RedisKeyGenerator.heartbeatKey(scheduleId, userId);
+        Duration heartbeatTtl = Duration.ofSeconds(queueProperties.getHeartbeatTtlSeconds());
+
+        return redisTemplate.opsForZSet().add(activeKey, userId.toString(), now)
+                .then(redisTemplate.opsForValue().set(heartbeatKey, "alive", heartbeatTtl))
+                .then(redisTemplate.opsForSet().add(RedisKeyGenerator.activeSchedulesKey(), scheduleId.toString()))
+                .then(queueTokenService.issueToken(userId, scheduleId))
+                .map(token -> {
+                    log.info("대기열 스킵 직접 입장: userId={}, scheduleId={}", userId, scheduleId);
+                    return QueueEntryResponse.builder()
+                            .scheduleId(scheduleId).userId(userId).position(0L)
+                            .estimatedWaitMinutes(0)
+                            .message("바로 입장 가능합니다").build();
+                });
+    }
+
+    private Mono<QueueEntryResponse> enterQueueNormal(Long scheduleId, Long userId) {
+        String queueKey = RedisKeyGenerator.queueKey(scheduleId);
+        double score = System.currentTimeMillis();
+
+        return redisTemplate.execute(queueEnterScript, List.of(queueKey),
+                        List.of(String.valueOf(queueProperties.getMaxQueueSize()),
+                                userId.toString(), String.valueOf((long) score)))
+                .next()
+                .flatMap(result -> {
+                    if (result == 0L) {
+                        return Mono.error(new BusinessException(ErrorCode.QUEUE_FULL));
+                    }
+                    String heartbeatKey = RedisKeyGenerator.heartbeatKey(scheduleId, userId);
+                    Duration heartbeatTtl = Duration.ofSeconds(queueProperties.getHeartbeatTtlSeconds());
+                    return redisTemplate.opsForValue().set(heartbeatKey, "alive", heartbeatTtl)
+                            .then(redisTemplate.opsForSet().add(RedisKeyGenerator.activeSchedulesKey(), scheduleId.toString()))
+                            .then(getPosition(scheduleId, userId))
+                            .map(position -> QueueEntryResponse.builder()
+                                    .scheduleId(scheduleId).userId(userId).position(position)
+                                    .estimatedWaitMinutes(calculateEstimatedWait(position))
+                                    .message(String.format("%d번째로 대기 중입니다", position)).build());
+                });
     }
 
     private Mono<Long> getPosition(Long scheduleId, Long userId) {
