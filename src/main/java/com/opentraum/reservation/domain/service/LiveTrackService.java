@@ -44,6 +44,9 @@ public class LiveTrackService {
         // 1. 티켓 오픈 시간 체크
         return eventServiceClient.findScheduleOrThrow(scheduleId)
                 .flatMap(schedule -> {
+                    if ("LOTTERY_ONLY".equals(schedule.getTrackPolicy())) {
+                        return Mono.error(new BusinessException(ErrorCode.TRACK_NOT_ALLOWED));
+                    }
                     LocalDateTime now = LocalDateTime.now();
                     if (now.isBefore(schedule.getTicketOpenAt())) {
                         return Mono.error(new BusinessException(ErrorCode.TICKET_NOT_OPENED));

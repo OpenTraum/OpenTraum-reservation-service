@@ -57,6 +57,9 @@ public class LotteryTrackService {
                 // 1. 추첨 트랙 시간대 체크
                 .then(eventServiceClient.findScheduleOrThrow(request.getScheduleId()))
                 .flatMap(schedule -> {
+                    if ("LIVE_ONLY".equals(schedule.getTrackPolicy())) {
+                        return Mono.error(new BusinessException(ErrorCode.TRACK_NOT_ALLOWED));
+                    }
                     LocalDateTime now = LocalDateTime.now();
                     LocalDateTime lotteryOpenAt = schedule.getTicketOpenAt().minusMinutes(ReservationConstants.LOTTERY_OPEN_MINUTES);
                     LocalDateTime lotteryEntryCloseAt = schedule.getTicketOpenAt().minusMinutes(ReservationConstants.LOTTERY_ENTRY_CLOSE_MINUTES);

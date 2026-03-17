@@ -16,4 +16,5 @@ public class ScheduleInfo {
     private Long concertId;
     private LocalDateTime ticketOpenAt;
     private String status;
+    private String trackPolicy;
 }
