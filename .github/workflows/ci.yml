@@ -1,0 +1,43 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Harbor 로그인
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.HARBOR_REGISTRY }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Docker 이미지 빌드 및 푸시
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}
+            ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:latest
+
+      - name: k8s 매니페스트 이미지 태그 업데이트
+        env:
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git remote set-url origin https://x-access-token:${GIT_TOKEN}@github.com/OpenTraum/OpenTraum-reservation-service.git
+          sed -i "s|image: .*opentraum-reservation-service.*|image: ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}|" k8s/deployment.yml
+          git add k8s/deployment.yml
+          git commit -m "chore: 이미지 태그 업데이트 [${{ github.sha }}]" || echo "변경사항 없음"
+          git push origin main
