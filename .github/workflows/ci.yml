@@ -42,8 +42,8 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-SERVICE_NAME:${{ github.sha }}
-            ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-SERVICE_NAME:latest
+            ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}
+            ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:latest
 
       - name: k8s 매니페스트 이미지 태그 업데이트
         env:
@@ -53,7 +53,7 @@ jobs:
           git config --global user.name "GitHub Actions"
           git fetch origin main
           git checkout main
-          sed -i "s|image: .*opentraum-SERVICE_NAME.*|image: ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-SERVICE_NAME:${{ github.sha }}|" k8s/deployment.yml
+          sed -i "s|image: .*opentraum-reservation-service.*|image: ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}|" k8s/deployment.yml
           git add k8s/deployment.yml
           git commit -m "chore: 이미지 태그 업데이트 [${{ github.sha }}]" || echo "변경사항 없음"
           git push origin main
