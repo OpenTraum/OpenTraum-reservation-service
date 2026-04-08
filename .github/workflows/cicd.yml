@@ -65,5 +65,5 @@ jobs:
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "chore: 이미지 태그 업데이트 [${{ github.sha }}] [skip ci]"
+          git commit -m "chore: 이미지 태그 업데이트 [${{ github.sha }}]"
           git push origin main
