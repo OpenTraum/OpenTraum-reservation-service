@@ -25,7 +25,7 @@ spec:
         - name: harbor-secret
       containers:
         - name: reservation-service
-          image: amdp-registry.skala-ai.com/skala26a-cloud/opentraum-reservation-service:95ef5cd8f8c39aa8c3955a84c8df14ab8c2b4f9d
+          image: amdp-registry.skala-ai.com/skala26a-cloud/opentraum-reservation-service:a236d96a499e4814802d346bd5a839ae0f305e8a
           ports:
             - containerPort: 8084
               protocol: TCP
