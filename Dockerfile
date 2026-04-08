@@ -12,7 +12,7 @@ COPY src/ src/
 
 RUN ./gradlew bootJar --no-daemon -x test
 
-FROM eclipse-temurin:21-jre-alpine AS runtime
+FROM bellsoft/liberica-openjre-alpine:21 AS runtime
 
 WORKDIR /app
 
