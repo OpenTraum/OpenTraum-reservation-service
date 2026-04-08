@@ -47,8 +47,8 @@ jobs:
         env:
           GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
         run: |
-          git config --global user.email "github-actions@github.com"
-          git config --global user.name "GitHub Actions"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
           git fetch origin main
           git checkout main
           sed -i "s|image: .*opentraum-reservation-service.*|image: ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}|" k8s/deployment.yml
