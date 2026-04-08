@@ -1,17 +1,31 @@
-name: CI/CD Pipeline
+name: CI/CD (main)
 
 on:
   push:
-    branches: [develop]
-  pull_request:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'gradle/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/**'
 
 jobs:
-  build-and-push:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GIT_TOKEN }}
+
+      - name: QEMU 설정
+        uses: docker/setup-qemu-action@v3
 
       - name: Docker Buildx 설정
         uses: docker/setup-buildx-action@v3
@@ -29,9 +43,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: |
-            ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}
-            ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:latest
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -42,7 +55,12 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
           git remote set-url origin https://x-access-token:${GIT_TOKEN}@github.com/OpenTraum/OpenTraum-reservation-service.git
+          git fetch origin main
+          git checkout main
           sed -i "s|image: .*opentraum-reservation-service.*|image: ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}|" k8s/deployment.yml
           git add k8s/deployment.yml
-          git commit -m "chore: 이미지 태그 업데이트 [${{ github.sha }}]" || echo "변경사항 없음"
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "chore: 이미지 태그 업데이트 [${{ github.sha }}] [skip ci]"
           git push origin main
