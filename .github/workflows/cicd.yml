@@ -3,19 +3,10 @@ name: CI/CD (main)
 on:
   push:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'gradle/**'
-      - 'build.gradle'
-      - 'settings.gradle'
-      - 'gradlew'
-      - 'gradlew.bat'
-      - 'Dockerfile'
-      - '.dockerignore'
-      - '.github/workflows/**'
 
 jobs:
   build-and-deploy:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: 코드 체크아웃
@@ -62,5 +53,5 @@ jobs:
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "chore: 이미지 태그 업데이트 [${{ github.sha }}] [skip ci]"
+          git commit -m "chore: 이미지 태그 업데이트 [${{ github.sha }}]"
           git push origin main
