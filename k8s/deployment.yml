@@ -20,6 +20,7 @@ spec:
         app.kubernetes.io/part-of: opentraum
         app.kubernetes.io/component: reservation
     spec:
+      terminationGracePeriodSeconds: 10
       imagePullSecrets:
         - name: harbor-secret
       containers:
@@ -40,27 +41,37 @@ spec:
               value: "opentraum"
             - name: SPRING_R2DBC_PASSWORD
               value: "opentraum"
+            - name: JAVA_OPTS
+              value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
+            - name: SPRING_MAIN_LAZY_INITIALIZATION
+              value: "true"
           resources:
             requests:
               memory: "256Mi"
-              cpu: "250m"
+              cpu: "500m"
             limits:
               memory: "512Mi"
-              cpu: "500m"
+              cpu: "1000m"
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8084
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 20
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: 8084
-            initialDelaySeconds: 90
-            periodSeconds: 15
-            timeoutSeconds: 5
-            failureThreshold: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: 8084
-            initialDelaySeconds: 60
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
       restartPolicy: Always
