@@ -27,9 +27,9 @@ dependencies {
     // Spring WebFlux (Reactive Web)
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
-    // R2DBC (Reactive DB - PostgreSQL)
+    // R2DBC (Reactive DB - MariaDB)
     implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
-    runtimeOnly 'org.postgresql:r2dbc-postgresql'
+    runtimeOnly 'io.asyncer:r2dbc-mysql:1.1.0'
 
     // Redis Reactive (Queue / Distributed Lock)
     implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
