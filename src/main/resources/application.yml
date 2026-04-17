@@ -7,7 +7,7 @@ spring:
 
   # R2DBC - MariaDB
   r2dbc:
-    url: r2dbc:mariadb://${DB_HOST:opentraum-mariadb}:${DB_PORT:3306}/opentraum_reservation
+    url: r2dbc:mysql://${DB_HOST:opentraum-mariadb}:${DB_PORT:3306}/opentraum_reservation
     username: ${DB_USERNAME:opentraum}
     password: ${DB_PASSWORD:opentraum123!}
     pool:
