@@ -3,7 +3,6 @@ package com.opentraum.reservation.domain.queue.service;
 import com.opentraum.reservation.domain.queue.config.QueueProperties;
 import com.opentraum.reservation.domain.queue.dto.QueueEntryResponse;
 import com.opentraum.reservation.domain.queue.dto.QueueStatusResponse;
-import com.opentraum.reservation.domain.service.SeatPoolService;
 import com.opentraum.reservation.global.exception.BusinessException;
 import com.opentraum.reservation.global.exception.ErrorCode;
 import com.opentraum.reservation.global.util.RedisKeyGenerator;
@@ -27,7 +26,6 @@ public class QueueService {
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final QueueTokenService queueTokenService;
     private final QueueProperties queueProperties;
-    private final SeatPoolService seatPoolService;
 
     private RedisScript<Long> queueEnterScript;
 
@@ -107,19 +105,16 @@ public class QueueService {
     private Mono<QueueEntryResponse> tryDirectAdmitOrQueue(Long scheduleId, Long userId) {
         String activeKey = RedisKeyGenerator.activeKey(scheduleId);
 
-        return Mono.zip(
-                redisTemplate.opsForZSet().size(activeKey).defaultIfEmpty(0L),
-                seatPoolService.getRemainingSeatsTotal(scheduleId)
-        ).flatMap(tuple -> {
-            long activeCount = tuple.getT1();
-            long remainingSeats = tuple.getT2();
-            long effectiveMaxActive = Math.min(remainingSeats, queueProperties.getMaxActiveUsers());
-
-            if (activeCount < effectiveMaxActive) {
-                return directAdmit(scheduleId, userId);
-            }
-            return enterQueueNormal(scheduleId, userId);
-        });
+        // Wave 3: 좌석 풀은 event-service 소유. reservation-service에서 잔여석을
+        // 직접 읽지 않는다. 활성 사용자 수 상한(maxActiveUsers)만으로 직행 입장 여부를 판정하고,
+        // 실제 좌석 가용성은 좌석 선택 시점에 event-service가 검증한다.
+        return redisTemplate.opsForZSet().size(activeKey).defaultIfEmpty(0L)
+                .flatMap(activeCount -> {
+                    if (activeCount < queueProperties.getMaxActiveUsers()) {
+                        return directAdmit(scheduleId, userId);
+                    }
+                    return enterQueueNormal(scheduleId, userId);
+                });
     }
 
     private Mono<QueueEntryResponse> directAdmit(Long scheduleId, Long userId) {
