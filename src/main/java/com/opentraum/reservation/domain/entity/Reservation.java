@@ -30,6 +30,8 @@ public class Reservation {
     private String trackType;
     private String status;
 
+    private String sagaId;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

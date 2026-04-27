@@ -1,7 +1,6 @@
 package com.opentraum.reservation.domain.service;
 
 import com.opentraum.reservation.domain.client.EventServiceClient;
-import com.opentraum.reservation.domain.client.dto.GradeSeatCount;
 import com.opentraum.reservation.domain.constants.ReservationConstants;
 import com.opentraum.reservation.domain.dto.*;
 import com.opentraum.reservation.domain.entity.Reservation;
@@ -9,12 +8,15 @@ import com.opentraum.reservation.domain.entity.ReservationSeat;
 import com.opentraum.reservation.domain.entity.ReservationSeatStatus;
 import com.opentraum.reservation.domain.entity.ReservationStatus;
 import com.opentraum.reservation.domain.entity.TrackType;
+import com.opentraum.reservation.domain.outbox.service.OutboxService;
 import com.opentraum.reservation.domain.repository.ReservationRepository;
 import com.opentraum.reservation.domain.repository.ReservationSeatRepository;
 import com.opentraum.reservation.domain.queue.service.QueueTokenService;
+import com.opentraum.reservation.domain.saga.SeatRef;
 import com.opentraum.reservation.global.exception.BusinessException;
 import com.opentraum.reservation.global.exception.ErrorCode;
 import com.opentraum.reservation.global.util.RedisKeyGenerator;
+import com.opentraum.reservation.global.util.SagaIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
@@ -25,13 +27,22 @@ import reactor.core.publisher.Mono;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * 추첨 트랙 예매/당첨 확정 흐름.
+ *
+ * <p>쓰기(좌석 DB 상태·Redis 풀 수정)는 event-service가 단독 소유하고, reservation-service는
+ * 읽기 목적으로만 Redis 좌석 풀({@code seats:{scheduleId}:{zone}})을 참조한다.
+ * 당첨자 Fisher-Yates 좌석 배정은 reservation 도메인 로직(여러 reservation에 좌석 분배)이므로
+ * reservation-service가 수행하고, SOLD 전이/풀 제거는 {@code LotterySeatAssigned} Outbox
+ * 이벤트로 event-service에 위임한다.
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -41,8 +52,8 @@ public class LotteryTrackService {
     private final ReservationSeatRepository reservationSeatRepository;
     private final EventServiceClient eventServiceClient;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
-    private final SeatPoolService seatPoolService;
     private final QueueTokenService queueTokenService;
+    private final OutboxService outboxService;
 
     // 추첨 트랙 예매 요청
     public Mono<ReservationResponse> createLotteryReservation(LotteryReservationRequest request, Long userId, String queueToken) {
@@ -88,9 +99,10 @@ public class LotteryTrackService {
                             }
                             return Mono.just(schedule);
                         }))
-                // 3. 추첨 쿼터 체크
+                // 3. 추첨 쿼터 체크 (등급 총 좌석수의 절반)
                 .flatMap(schedule -> Mono.zip(
-                        seatPoolService.getRemainingSeatsLottery(request.getScheduleId(), request.getGrade()),
+                        eventServiceClient.countSeatsByScheduleAndGrade(request.getScheduleId(), request.getGrade())
+                                .map(total -> total / 2),
                         reservationRepository.sumLotteryQuantityByScheduleAndGrade(request.getScheduleId(), request.getGrade())
                 ))
                 .flatMap(tuple -> {
@@ -107,12 +119,36 @@ public class LotteryTrackService {
                             .quantity(request.getQuantity())
                             .trackType(TrackType.LOTTERY.name())
                             .status(ReservationStatus.PENDING.name())
+                            .sagaId(SagaIdGenerator.newSagaId())
                             .createdAt(LocalDateTime.now())
                             .updatedAt(LocalDateTime.now())
                             .build();
-                    return reservationRepository.save(reservation);
+                    return reservationRepository.save(reservation)
+                            .flatMap(saved -> publishLotteryReservationCreated(saved).thenReturn(saved));
                 })
                 .map(this::createReservationResponse);
+    }
+
+    /**
+     * Lottery 응모 저장 직후 {@code LotteryReservationCreated} Outbox 이벤트 발행.
+     *
+     * <p>Lottery 트랙은 응모 시점에 좌석이 배정되지 않아 좌석별 price를 확정할 수 없고,
+     * 등급별 단가를 이용해 quantity 만큼 곱한 총액이 필요하다. 현재 event-service 내부 API에
+     * 등급 단가 조회 경로가 없으므로 {@code amount}는 null로 발행하고, 추후 등급 단가 조회가
+     * 추가되면 {@code quantity * gradePrice}로 채운다.
+     */
+    private Mono<Void> publishLotteryReservationCreated(Reservation saved) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("user_id", saved.getUserId());
+        payload.put("schedule_id", saved.getScheduleId());
+        payload.put("track_type", TrackType.LOTTERY.name());
+        payload.put("grade", saved.getGrade());
+        payload.put("quantity", saved.getQuantity());
+        payload.put("amount", null);
+        return outboxService.publish(
+                        saved.getId(), "reservation", "LotteryReservationCreated",
+                        saved.getSagaId(), payload)
+                .then();
     }
 
     private ReservationResponse createReservationResponse(Reservation saved) {
@@ -144,7 +180,29 @@ public class LotteryTrackService {
                 .then();
     }
 
-    // Fisher-Yates Shuffle로 추첨 좌석 배정
+    /**
+     * Fisher-Yates 기반 추첨 좌석 배정 + 머지.
+     *
+     * <p>Wave 3 이벤트 전환 설계 롤백: event-service에 Lottery 전용 Fisher-Yates 리스너를 두는
+     * 대신, reservation-service가 직접 배정 로직을 수행한다. 등급별 가용 좌석 목록은
+     * event-service의 권위 있는 상태가 Redis에 캐싱된 {@code seats:{scheduleId}:{zone}} 집합을
+     * <b>읽기 전용</b>으로 조회해 얻는다. 좌석 풀에 대한 <b>쓰기(SOLD 전이 / Redis 제거)</b>는
+     * 여전히 event-service만 담당하며, 본 메서드는 reservation 도메인 쪽 상태(reservation_seats
+     * ASSIGNED, reservation.status=ASSIGNED)만 확정한 뒤 {@code LotterySeatAssigned} Outbox를
+     * 발행해 event-service에서 batch SOLD를 수행하도록 한다.
+     *
+     * <p>배정 절차:
+     * <ol>
+     *   <li>schedule 내 PAID_PENDING_SEAT Lottery 예약 수집 (createdAt 순 정렬)</li>
+     *   <li>grade 별로 그룹핑</li>
+     *   <li>grade 당: event-service REST로 zone 목록 획득 → 각 zone의 Redis AVAILABLE
+     *       좌석 번호 조회 → 하나의 리스트로 합침</li>
+     *   <li>Fisher-Yates shuffle 후 quantity 만큼 slice 해서 각 reservation에 분배</li>
+     *   <li>reservation_seats 저장(ASSIGNED) + reservation.status=ASSIGNED 전이</li>
+     *   <li>reservation 단위로 {@code LotterySeatAssigned} Outbox 발행
+     *       (payload.seats 포함). event-service가 수신해 SOLD 확정.</li>
+     * </ol>
+     */
     public Mono<Void> assignSeatsToPaidLotteryAndMerge(Long scheduleId) {
         return reservationRepository.findByScheduleIdAndTrackTypeAndStatus(
                         scheduleId, TrackType.LOTTERY.name(), ReservationStatus.PAID_PENDING_SEAT.name())
@@ -157,32 +215,106 @@ public class LotteryTrackService {
                     Map<String, List<Reservation>> byGrade = reservations.stream()
                             .collect(Collectors.groupingBy(Reservation::getGrade));
                     return Flux.fromIterable(byGrade.entrySet())
-                            .flatMap(entry -> {
-                                String grade = entry.getKey();
-                                List<Reservation> resList = entry.getValue();
-                                return seatPoolService.getAvailableSeatsForGrade(scheduleId, grade)
-                                        .flatMap(seatList -> {
-                                            fisherYatesShuffle(seatList);
-                                            long need = resList.stream().mapToLong(Reservation::getQuantity).sum();
-                                            if (need > seatList.size()) {
-                                                return Mono.error(new BusinessException(ErrorCode.SEAT_ALREADY_TAKEN));
-                                            }
-                                            AtomicInteger index = new AtomicInteger(0);
-                                            return Flux.fromIterable(resList)
-                                                    .concatMap(r -> {
-                                                        int start = index.get();
-                                                        int q = r.getQuantity();
-                                                        index.addAndGet(q);
-                                                        List<ZoneSeatAssignmentResponse> slice = seatList.subList(start, start + q);
-                                                        return assignSeatsFromList(scheduleId, r, slice)
-                                                                .then(updateReservationAssigned(r.getId()));
-                                                    })
-                                                    .then();
-                                        });
-                            })
+                            .concatMap(entry -> assignGrade(scheduleId, entry.getKey(), entry.getValue()))
                             .then();
                 })
                 .doOnSuccess(v -> log.info("추첨 좌석 배정 완료 (Fisher-Yates): scheduleId={}", scheduleId));
+    }
+
+    private Mono<Void> assignGrade(Long scheduleId, String grade, List<Reservation> reservations) {
+        return fetchAvailableSeatsForGrade(scheduleId, grade)
+                .flatMap(seatList -> {
+                    fisherYatesShuffle(seatList);
+                    long need = reservations.stream().mapToLong(Reservation::getQuantity).sum();
+                    if (need > seatList.size()) {
+                        return Mono.<Void>error(new BusinessException(ErrorCode.SEAT_ALREADY_TAKEN));
+                    }
+                    AtomicInteger index = new AtomicInteger(0);
+                    return Flux.fromIterable(reservations)
+                            .concatMap(r -> {
+                                int start = index.get();
+                                int q = r.getQuantity();
+                                index.addAndGet(q);
+                                List<ZoneSeatAssignmentResponse> slice = new ArrayList<>(
+                                        seatList.subList(start, start + q));
+                                return assignToReservation(scheduleId, r, slice);
+                            })
+                            .then();
+                });
+    }
+
+    /**
+     * event-service가 쓰는 Redis 좌석 풀(seats:{scheduleId}:{zone})을 <b>읽기 전용</b>으로 조회.
+     * reservation-service는 쓰기 경로로 이 키를 건드리지 않는다.
+     */
+    private Mono<List<ZoneSeatAssignmentResponse>> fetchAvailableSeatsForGrade(Long scheduleId, String grade) {
+        return eventServiceClient.getZonesByGrade(scheduleId, grade)
+                .flatMapMany(Flux::fromIterable)
+                .concatMap(zone -> redisTemplate.opsForSet()
+                        .members(seatsPoolKey(scheduleId, zone))
+                        .map(seatNumber -> new ZoneSeatAssignmentResponse(zone, seatNumber)))
+                .collectList();
+    }
+
+    /**
+     * event-service RedisKeyGenerator.seatsKey 와 동일한 포맷.
+     * 공용 Redis를 공유하므로 키 네이밍이 깨지면 안 된다.
+     */
+    private static String seatsPoolKey(Long scheduleId, String zone) {
+        return String.format("seats:%d:%s", scheduleId, zone);
+    }
+
+    private Mono<Void> assignToReservation(Long scheduleId, Reservation reservation,
+                                           List<ZoneSeatAssignmentResponse> slice) {
+        if (slice.isEmpty()) {
+            return Mono.empty();
+        }
+        return Flux.fromIterable(slice)
+                .concatMap(a -> eventServiceClient.findSeatByScheduleAndZoneAndNumber(
+                                scheduleId, a.getZone(), a.getSeatNumber())
+                        .flatMap(seatInfo -> reservationSeatRepository.save(ReservationSeat.builder()
+                                .reservationId(reservation.getId())
+                                .seatId(seatInfo.getId())
+                                .zone(a.getZone())
+                                .seatNumber(a.getSeatNumber())
+                                .status(ReservationSeatStatus.ASSIGNED.name())
+                                .assignedAt(LocalDateTime.now())
+                                .createdAt(LocalDateTime.now())
+                                .build())))
+                .then(Mono.defer(() -> {
+                    reservation.setQuantity(slice.size());
+                    reservation.setStatus(ReservationStatus.ASSIGNED.name());
+                    reservation.setUpdatedAt(LocalDateTime.now());
+                    if (reservation.getSagaId() == null) {
+                        reservation.setSagaId(SagaIdGenerator.newSagaId());
+                    }
+                    return reservationRepository.save(reservation);
+                }))
+                .flatMap(saved -> publishLotterySeatAssigned(saved, slice))
+                .then();
+    }
+
+    /**
+     * Lottery 배정 결과 Outbox 발행.
+     *
+     * <p>event-service {@code ReservationEventListener}가 이를 받아 좌석 DB를 SOLD로 확정하고
+     * Redis 좌석 풀을 제거한다. aggregate_type="reservation"이 유지되어 기존 Debezium 라우팅을
+     * 재사용한다.
+     */
+    private Mono<Void> publishLotterySeatAssigned(Reservation reservation,
+                                                   List<ZoneSeatAssignmentResponse> slice) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("user_id", reservation.getUserId());
+        payload.put("schedule_id", reservation.getScheduleId());
+        payload.put("track_type", TrackType.LOTTERY.name());
+        payload.put("grade", reservation.getGrade());
+        payload.put("seats", slice.stream()
+                .map(a -> SeatRef.builder().zone(a.getZone()).seatNumber(a.getSeatNumber()).build())
+                .toList());
+        return outboxService.publish(
+                        reservation.getId(), "reservation", "LotterySeatAssigned",
+                        reservation.getSagaId(), payload)
+                .then();
     }
 
     private static void fisherYatesShuffle(List<ZoneSeatAssignmentResponse> list) {
@@ -192,68 +324,6 @@ public class LotteryTrackService {
             list.set(i, list.get(j));
             list.set(j, tmp);
         }
-    }
-
-    private Mono<Void> assignSeatsFromList(Long scheduleId, Reservation reservation, List<ZoneSeatAssignmentResponse> assignments) {
-        if (assignments.isEmpty()) {
-            return Mono.empty();
-        }
-        return Flux.fromIterable(assignments)
-                .flatMap(a -> seatPoolService.selectSeat(scheduleId, a.getZone(), a.getSeatNumber()).thenReturn(a))
-                .collectList()
-                .flatMap(kept -> batchFetchSeatsAndBuildReservationSeats(scheduleId, reservation.getId(), kept)
-                        .flatMap(toSave -> reservationSeatRepository.saveAll(toSave)
-                                .then(Flux.fromIterable(kept)
-                                        .flatMap(a -> eventServiceClient.updateSeatStatus(scheduleId, a.getZone(), a.getSeatNumber(), "SOLD"))
-                                        .then())));
-    }
-
-    private Mono<List<ReservationSeat>> batchFetchSeatsAndBuildReservationSeats(
-            Long scheduleId, Long reservationId, List<ZoneSeatAssignmentResponse> assignments) {
-        if (assignments.isEmpty()) {
-            return Mono.just(List.of());
-        }
-        Map<String, List<String>> zoneToSeatNumbers = assignments.stream()
-                .collect(Collectors.groupingBy(ZoneSeatAssignmentResponse::getZone,
-                        Collectors.mapping(ZoneSeatAssignmentResponse::getSeatNumber, Collectors.toList())));
-        return Flux.fromIterable(zoneToSeatNumbers.entrySet())
-                .flatMap(e -> eventServiceClient.findSeatsByScheduleAndZoneAndNumbers(scheduleId, e.getKey(), e.getValue()))
-                .collectList()
-                .flatMap(seats -> {
-                    Map<String, Long> keyToSeatId = seats.stream()
-                            .collect(Collectors.toMap(s -> s.getZone() + "_" + s.getSeatNumber(), s -> s.getId()));
-                    List<ReservationSeat> toSave = new ArrayList<>();
-                    for (ZoneSeatAssignmentResponse a : assignments) {
-                        Long seatId = keyToSeatId.get(a.getZone() + "_" + a.getSeatNumber());
-                        if (seatId == null) {
-                            return Mono.<List<ReservationSeat>>error(new BusinessException(ErrorCode.SEAT_ALREADY_TAKEN));
-                        }
-                        toSave.add(ReservationSeat.builder()
-                                .reservationId(reservationId)
-                                .seatId(seatId)
-                                .zone(a.getZone())
-                                .seatNumber(a.getSeatNumber())
-                                .status(ReservationSeatStatus.ASSIGNED.name())
-                                .assignedAt(LocalDateTime.now())
-                                .createdAt(LocalDateTime.now())
-                                .build());
-                    }
-                    return Mono.just(toSave);
-                });
-    }
-
-    private Mono<Void> updateReservationAssigned(Long reservationId) {
-        return reservationRepository.findById(reservationId)
-                .flatMap(r -> reservationSeatRepository.findByReservationId(reservationId)
-                        .filter(rs -> ReservationSeatStatus.ASSIGNED.name().equals(rs.getStatus()))
-                        .count()
-                        .flatMap(count -> {
-                            r.setQuantity(count.intValue());
-                            r.setStatus(ReservationStatus.ASSIGNED.name());
-                            r.setUpdatedAt(LocalDateTime.now());
-                            return reservationRepository.save(r);
-                        }))
-                .then();
     }
 
     // 양 트랙 중복 참여 체크

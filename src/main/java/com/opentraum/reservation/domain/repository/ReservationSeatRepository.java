@@ -18,4 +18,15 @@ public interface ReservationSeatRepository extends ReactiveCrudRepository<Reserv
     @Modifying
     @Query("UPDATE reservation_seats SET status = 'CANCELLED' WHERE reservation_id = :reservationId")
     Mono<Integer> updateStatusToCancelledByReservationId(Long reservationId);
+
+    /**
+     * 특정 seat row 를 PENDING → CANCELLED 로 원자적 전이.
+     *
+     * <p>동시 DELETE 요청 race 방어. 두 요청이 동시에 진입하면 InnoDB row lock 으로 직렬화되고
+     * 첫 번째 UPDATE 만 {@code rows=1} 반환, 두 번째는 {@code rows=0} 으로 귀결된다.
+     * 호출자는 반환값으로 승자/패자를 판별해 이후 quantity 감소 + outbox 발행을 승자만 수행한다.
+     */
+    @Modifying
+    @Query("UPDATE reservation_seats SET status = 'CANCELLED' WHERE id = :id AND status = 'PENDING'")
+    Mono<Integer> tryCancelPending(Long id);
 }

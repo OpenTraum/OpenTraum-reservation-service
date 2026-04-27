@@ -5,10 +5,12 @@ metadata:
   namespace: opentraum
   labels:
     app: reservation-service
+    app.kubernetes.io/name: reservation-service
     app.kubernetes.io/part-of: opentraum
     app.kubernetes.io/component: reservation
 spec:
   replicas: 1
+  revisionHistoryLimit: 2
   selector:
     matchLabels:
       app: reservation-service
@@ -16,14 +18,14 @@ spec:
     metadata:
       labels:
         app: reservation-service
+        app.kubernetes.io/name: reservation-service
         app.kubernetes.io/part-of: opentraum
         app.kubernetes.io/component: reservation
     spec:
-      terminationGracePeriodSeconds: 10
+      terminationGracePeriodSeconds: 40
       imagePullSecrets:
         - name: harbor-secret
       priorityClassName: opentraum-high
-      serviceAccountName: opentraum-sidecar-sa
       affinity:
         podAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -44,11 +46,18 @@ spec:
               podAffinityTerm:
                 labelSelector:
                   matchExpressions:
-                    - key: app
+                    - key: app.kubernetes.io/name
                       operator: In
                       values:
                         - reservation-service
                 topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: opentraum
       initContainers:
         - name: wait-for-payment
           image: busybox:1.36
@@ -69,7 +78,7 @@ spec:
               memory: 32Mi
       containers:
         - name: reservation-service
-          image: amdp-registry.skala-ai.com/skala26a-cloud/opentraum-reservation-service:77b3241ae3a862b65d2543784b83a09fa48c71a4
+          image: amdp-registry.skala-ai.com/skala26a-cloud/opentraum-reservation-service:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8084
@@ -79,15 +88,23 @@ spec:
                 name: opentraum-config
           env:
             - name: SPRING_R2DBC_URL
-              value: "r2dbc:mysql://opentraum-mariadb.mariadb:3306/opentraum_reservation"
+              value: "r2dbc:mysql://reservation-db.kafka:3306/reservation"
             - name: SPRING_R2DBC_USERNAME
-              value: "opentraum"
+              valueFrom:
+                secretKeyRef:
+                  name: reservation-db-secret
+                  key: mariadb-user
             - name: SPRING_R2DBC_PASSWORD
-              value: "opentraum123!"
+              valueFrom:
+                secretKeyRef:
+                  name: reservation-db-secret
+                  key: mariadb-password
+            - name: OTLP_TRACING_ENDPOINT
+              value: "http://alloy-otlp.monitoring:4318/v1/traces"
             - name: JAVA_OPTS
               value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
             - name: SPRING_MAIN_LAZY_INITIALIZATION
-              value: "true"
+              value: "false"
           resources:
             requests:
               memory: "512Mi"
@@ -95,36 +112,4 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
-          startupProbe:
-            httpGet:
-              path: /actuator/health
-              port: 8084
-            initialDelaySeconds: 5
-            periodSeconds: 3
-            timeoutSeconds: 3
-            failureThreshold: 20
-          livenessProbe:
-            httpGet:
-              path: /actuator/health
-              port: 8084
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /actuator/health
-              port: 8084
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 2
-        - name: kubectl-sidecar
-          image: bitnami/kubectl:latest
-          command: ["sh", "-c", "echo sidecar ready; sleep infinity"]
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 50m
-              memory: 64Mi
       restartPolicy: Always

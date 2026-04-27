@@ -15,13 +15,23 @@ public interface ReservationRepository extends ReactiveCrudRepository<Reservatio
 
     Flux<Reservation> findByScheduleIdAndStatus(Long scheduleId, String status);
 
-    Mono<Boolean> existsByUserIdAndScheduleId(Long userId, Long scheduleId);
+    @Query("SELECT COUNT(*) FROM reservations WHERE user_id = :userId AND schedule_id = :scheduleId")
+    Mono<Long> countByUserIdAndScheduleId(Long userId, Long scheduleId);
 
-    @Query("SELECT CASE WHEN COUNT(*) > 0 THEN true ELSE false END FROM reservations " +
+    default Mono<Boolean> existsByUserIdAndScheduleId(Long userId, Long scheduleId) {
+        return countByUserIdAndScheduleId(userId, scheduleId).map(c -> c > 0);
+    }
+
+    @Query("SELECT COUNT(*) FROM reservations " +
            "WHERE user_id = :userId AND schedule_id = :scheduleId " +
            "AND status IN (:s1, :s2, :s3, :s4)")
-    Mono<Boolean> existsByUserIdAndScheduleIdAndStatusIn(Long userId, Long scheduleId,
-                                                          String s1, String s2, String s3, String s4);
+    Mono<Long> countByUserIdAndScheduleIdAndStatusIn(Long userId, Long scheduleId,
+                                                     String s1, String s2, String s3, String s4);
+
+    default Mono<Boolean> existsByUserIdAndScheduleIdAndStatusIn(Long userId, Long scheduleId,
+                                                                 String s1, String s2, String s3, String s4) {
+        return countByUserIdAndScheduleIdAndStatusIn(userId, scheduleId, s1, s2, s3, s4).map(c -> c > 0);
+    }
 
     Mono<Reservation> findFirstByUserIdAndScheduleIdAndTrackType(Long userId, Long scheduleId, String trackType);
 
