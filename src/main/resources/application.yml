@@ -1,9 +1,13 @@
 server:
   port: 8084
+  shutdown: graceful
 
 spring:
   application:
     name: opentraum-reservation-service
+
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 
   # R2DBC - MariaDB
   r2dbc:
@@ -25,12 +29,19 @@ spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
-      group-id: reservation-service-group
+      group-id: reservation-saga-group
       auto-offset-reset: earliest
       enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
     producer:
       acks: all
       retries: 3
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    listener:
+      concurrency: 3
+      ack-mode: MANUAL_IMMEDIATE
 
   # SQL Init
   sql:
@@ -38,18 +49,26 @@ spring:
       mode: always
       schema-locations: classpath:schema.sql
 
-# Actuator + Prometheus
+# Actuator + Prometheus + Tracing
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always
   metrics:
     tags:
       application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: 1.0
+    propagation:
+      type: w3c
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACING_ENDPOINT:http://alloy.monitoring:4318/v1/traces}
 
 # Queue Properties
 opentraum:
@@ -79,3 +98,5 @@ logging:
     com.opentraum.reservation: DEBUG
     org.springframework.r2dbc: DEBUG
     org.springframework.data.redis: DEBUG
+  pattern:
+    level: "%5p [${spring.application.name:reservation-service},%X{traceId:-},%X{spanId:-}]"

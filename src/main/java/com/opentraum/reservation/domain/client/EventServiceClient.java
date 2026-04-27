@@ -2,14 +2,18 @@ package com.opentraum.reservation.domain.client;
 
 import com.opentraum.reservation.domain.client.dto.GradeSeatCount;
 import com.opentraum.reservation.domain.client.dto.ScheduleInfo;
+import com.opentraum.reservation.domain.client.dto.SeatHoldRequest;
+import com.opentraum.reservation.domain.client.dto.SeatHoldResponse;
 import com.opentraum.reservation.domain.client.dto.SeatInfo;
 import com.opentraum.reservation.global.exception.BusinessException;
 import com.opentraum.reservation.global.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -140,5 +144,28 @@ public class EventServiceClient {
                         .build())
                 .retrieve()
                 .bodyToFlux(SeatInfo.class);
+    }
+
+    /**
+     * 좌석 단건 HOLD 동기 호출.
+     *
+     * <p>Live 트랙 좌석 선택 시 race condition 방지를 위해 event-service 의 원자 UPDATE 를
+     * 동기로 호출한다. 성공 시 event-service 내부에서 {@code SeatHeld} outbox 발행까지 완료된다.
+     *
+     * @return 200 OK: 좌석 확보 성공 시 {@link SeatHoldResponse}
+     *         409 Conflict: 이미 다른 예약이 점유 → {@link BusinessException}({@link ErrorCode#SEAT_ALREADY_TAKEN})
+     */
+    public Mono<SeatHoldResponse> tryHold(SeatHoldRequest request) {
+        return webClient.post()
+                .uri("/api/v1/internal/seats/hold")
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono(SeatHoldResponse.class)
+                .onErrorResume(WebClientResponseException.class, ex -> {
+                    if (ex.getStatusCode() == HttpStatus.CONFLICT) {
+                        return Mono.error(new BusinessException(ErrorCode.SEAT_ALREADY_TAKEN));
+                    }
+                    return Mono.error(ex);
+                });
     }
 }

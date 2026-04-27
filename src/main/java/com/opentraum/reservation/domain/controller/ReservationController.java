@@ -4,8 +4,8 @@ import com.opentraum.reservation.domain.dto.CancellationWindowResponse;
 import com.opentraum.reservation.domain.dto.MyReservationResponse;
 import com.opentraum.reservation.domain.dto.ReservationResponse;
 import com.opentraum.reservation.domain.service.CancellationWindowService;
-import com.opentraum.reservation.domain.service.ReservationCancelService;
 import com.opentraum.reservation.domain.service.ReservationQueryService;
+import com.opentraum.reservation.domain.service.ReservationSagaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -26,7 +26,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ReservationController {
 
-    private final ReservationCancelService reservationCancelService;
+    private final ReservationSagaService reservationSagaService;
     private final CancellationWindowService cancellationWindowService;
     private final ReservationQueryService reservationQueryService;
 
@@ -60,14 +60,16 @@ public class ReservationController {
     }
 
     @Operation(
-            summary = "예약 취소",
-            description = "배정된 또는 배정 대기 중인 예약을 취소합니다. 티켓 오픈 2시간 후부터 24시간 이내만 가능합니다."
+            summary = "예약 취소 (SAGA)",
+            description = "배정된 또는 배정 대기 중인 예약을 취소합니다. " +
+                    "결제 완료 예약은 ReservationRefundRequested를 발행하여 payment-service 환불 SAGA를 트리거합니다. " +
+                    "미결제 예약은 ReservationCancelled를 즉시 발행합니다."
     )
     @DeleteMapping("/{reservationId}")
     public Mono<ResponseEntity<Void>> cancelReservation(
             @PathVariable Long reservationId,
             @RequestHeader("X-User-Id") Long userId) {
-        return reservationCancelService.cancelReservation(reservationId, userId)
+        return reservationSagaService.userCancel(reservationId, userId)
                 .then(Mono.just(ResponseEntity.noContent().<Void>build()));
     }
 
