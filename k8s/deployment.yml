@@ -8,7 +8,6 @@ metadata:
     app.kubernetes.io/part-of: opentraum
     app.kubernetes.io/component: reservation
 spec:
-  revisionHistoryLimit: 2
   replicas: 1
   selector:
     matchLabels:
@@ -23,9 +22,55 @@ spec:
       terminationGracePeriodSeconds: 10
       imagePullSecrets:
         - name: harbor-secret
+      priorityClassName: opentraum-high
+      serviceAccountName: opentraum-sidecar-sa
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 80
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - reservation-service
+                        - payment-service
+                        - event-service
+                topologyKey: kubernetes.io/hostname
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - reservation-service
+                topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: wait-for-payment
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - >
+              echo Waiting for payment-service...;
+              until wget -qO- http://payment-service:8085/actuator/health 2>/dev/null | grep -q UP;
+              do echo payment not ready; sleep 3; done;
+              echo payment-service is ready!
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 10m
+              memory: 32Mi
       containers:
         - name: reservation-service
-          image: amdp-registry.skala-ai.com/skala26a-cloud/opentraum-reservation-service:af5ee87e7f18f5047eb0d551518719e6fd54958f
+          image: amdp-registry.skala-ai.com/skala26a-cloud/opentraum-reservation-service:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8084
               protocol: TCP
@@ -33,25 +78,23 @@ spec:
             - configMapRef:
                 name: opentraum-config
           env:
-            - name: SPRING_DATASOURCE_URL
-              value: "jdbc:postgresql://opentraum-postgres:5432/opentraum_reservation"
             - name: SPRING_R2DBC_URL
-              value: "r2dbc:postgresql://opentraum-postgres:5432/opentraum_reservation"
+              value: "r2dbc:mysql://opentraum-mariadb.mariadb:3306/opentraum_reservation"
             - name: SPRING_R2DBC_USERNAME
               value: "opentraum"
             - name: SPRING_R2DBC_PASSWORD
-              value: "opentraum"
+              value: "opentraum123!"
             - name: JAVA_OPTS
               value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
             - name: SPRING_MAIN_LAZY_INITIALIZATION
               value: "true"
           resources:
             requests:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "500m"
             limits:
               memory: "512Mi"
-              cpu: "1000m"
+              cpu: "500m"
           startupProbe:
             httpGet:
               path: /actuator/health
@@ -74,4 +117,14 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 2
+        - name: kubectl-sidecar
+          image: bitnami/kubectl:latest
+          command: ["sh", "-c", "echo sidecar ready; sleep infinity"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
       restartPolicy: Always
