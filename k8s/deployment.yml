@@ -99,6 +99,8 @@ spec:
                 secretKeyRef:
                   name: reservation-db-secret
                   key: mariadb-password
+            - name: TZ
+              value: "Asia/Seoul"
             - name: OTLP_TRACING_ENDPOINT
               value: "http://alloy-otlp.monitoring:4318/v1/traces"
             - name: JAVA_OPTS
