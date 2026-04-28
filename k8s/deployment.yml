@@ -78,7 +78,7 @@ spec:
               memory: 32Mi
       containers:
         - name: reservation-service
-          image: amdp-registry.skala-ai.com/skala26a-cloud/opentraum-reservation-service:b3e7b8d0ef399846ba0f74aea36e458d29a75a56
+          image: amdp-registry.skala-ai.com/skala26a-cloud/opentraum-reservation-service:4426675746d3632360ebb356326ee052a87270a2
           imagePullPolicy: Always
           ports:
             - containerPort: 8084
