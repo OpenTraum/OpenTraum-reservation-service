@@ -5,6 +5,7 @@ import com.opentraum.reservation.domain.entity.ReservationStatus;
 import com.opentraum.reservation.domain.entity.TrackType;
 import com.opentraum.reservation.domain.outbox.service.OutboxService;
 import com.opentraum.reservation.domain.repository.ReservationRepository;
+import com.opentraum.reservation.domain.repository.ReservationSeatRepository;
 import com.opentraum.reservation.domain.saga.SeatRef;
 import com.opentraum.reservation.global.exception.BusinessException;
 import com.opentraum.reservation.global.exception.ErrorCode;
@@ -37,6 +38,7 @@ public class ReservationSagaService {
     private static final String AGGREGATE_TYPE = "reservation";
 
     private final ReservationRepository reservationRepository;
+    private final ReservationSeatRepository reservationSeatRepository;
     private final OutboxService outboxService;
     private final TransactionalOperator txOperator;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
@@ -201,7 +203,8 @@ public class ReservationSagaService {
                         reservation.setStatus(ReservationStatus.CANCELLED.name());
                         reservation.setUpdatedAt(LocalDateTime.now());
                         Mono<Void> work = reservationRepository.save(reservation)
-                                .flatMap(saved -> publishCancelled(saved, "USER_CANCELLED"))
+                                .then(reservationSeatRepository.updateStatusToCancelledByReservationId(reservation.getId()))
+                                .then(publishCancelled(reservation, "USER_CANCELLED"))
                                 .then();
                         return txOperator.transactional(work);
                     }
@@ -214,7 +217,8 @@ public class ReservationSagaService {
     }
 
     /**
-     * RefundCompleted 수신: REFUNDED로 확정.
+     * RefundCompleted 수신: reservation REFUNDED + reservation_seats CANCELLED + ReservationCancelled outbox 발행.
+     * event-service가 outbox 이벤트로 좌석 풀 반환 + seats 테이블 AVAILABLE 전이를 batch 처리한다.
      */
     public Mono<Void> confirmRefund(String sagaId, Long reservationId) {
         return reservationRepository.findById(reservationId)
@@ -225,7 +229,10 @@ public class ReservationSagaService {
                     }
                     reservation.setStatus(ReservationStatus.REFUNDED.name());
                     reservation.setUpdatedAt(LocalDateTime.now());
-                    return reservationRepository.save(reservation).then();
+                    return reservationRepository.save(reservation)
+                            .then(reservationSeatRepository.updateStatusToCancelledByReservationId(reservationId))
+                            .then(publishCancelled(reservation, "USER_REFUND"))
+                            .then();
                 })
                 .as(txOperator::transactional)
                 .then();
