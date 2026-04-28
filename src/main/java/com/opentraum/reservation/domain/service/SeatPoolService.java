@@ -6,6 +6,7 @@ import com.opentraum.reservation.global.util.RedisKeyGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -14,7 +15,7 @@ import java.util.List;
 
 /**
  * Redis 기반 좌석 풀 관리 (공유 Redis 직접 접근).
- * Redis Key: seat-pool:{scheduleId}:{zone} (Set of seatNumber)
+ * Redis Key: seats:{scheduleId}:{zone} (Set of seatNumber, event-service와 공유)
  */
 @Slf4j
 @Service
@@ -25,24 +26,24 @@ public class SeatPoolService {
     private final EventServiceClient eventServiceClient;
 
     public Mono<Boolean> selectSeat(Long scheduleId, String zone, String seatNumber) {
-        String key = RedisKeyGenerator.seatPoolKey(scheduleId, zone);
+        String key = RedisKeyGenerator.seatsKey(scheduleId, zone);
         return redisTemplate.opsForSet().remove(key, seatNumber)
                 .map(removed -> removed > 0);
     }
 
     public Mono<Boolean> returnSeat(Long scheduleId, String zone, String seatNumber) {
-        String key = RedisKeyGenerator.seatPoolKey(scheduleId, zone);
+        String key = RedisKeyGenerator.seatsKey(scheduleId, zone);
         return redisTemplate.opsForSet().add(key, seatNumber)
                 .map(added -> added > 0);
     }
 
     public Flux<String> getAvailableSeats(Long scheduleId, String zone) {
-        String key = RedisKeyGenerator.seatPoolKey(scheduleId, zone);
+        String key = RedisKeyGenerator.seatsKey(scheduleId, zone);
         return redisTemplate.opsForSet().members(key);
     }
 
     public Mono<Long> getRemainingSeats(Long scheduleId, String zone) {
-        String key = RedisKeyGenerator.seatPoolKey(scheduleId, zone);
+        String key = RedisKeyGenerator.seatsKey(scheduleId, zone);
         return redisTemplate.opsForSet().size(key);
     }
 
@@ -54,10 +55,11 @@ public class SeatPoolService {
                 .reduce(0L, Long::sum);
     }
 
-    // 전체 구역 잔여석 합산 (SCAN 패턴 매칭 후 SCARD)
+    // 전체 구역 잔여석 합산 (SCAN 비차단 순회 후 SCARD)
     public Mono<Long> getRemainingSeatsTotal(Long scheduleId) {
-        String pattern = "seat-pool:" + scheduleId + ":*";
-        return redisTemplate.keys(pattern)
+        String pattern = "seats:" + scheduleId + ":*";
+        ScanOptions options = ScanOptions.scanOptions().match(pattern).count(100).build();
+        return redisTemplate.scan(options)
                 .flatMap(key -> redisTemplate.opsForSet().size(key))
                 .reduce(0L, Long::sum)
                 .defaultIfEmpty(0L);
