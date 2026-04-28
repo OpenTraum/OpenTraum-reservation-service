@@ -41,6 +41,7 @@ public class ReservationSagaService {
     private final TransactionalOperator txOperator;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final CancellationWindowService cancellationWindowService;
+    private final LiveTrackService liveTrackService;
 
     /**
      * Live 예약 생성 + ReservationCreated 발행.
@@ -102,7 +103,7 @@ public class ReservationSagaService {
     }
 
     /**
-     * Live 결제 완료 확정: PENDING → PAID.
+     * Live 결제 완료 확정: reservation PENDING → PAID, reservation_seats PENDING → ASSIGNED.
      */
     public Mono<Void> confirmLive(String sagaId, Long reservationId, Long paymentId) {
         return reservationRepository.findById(reservationId)
@@ -114,7 +115,8 @@ public class ReservationSagaService {
                     reservation.setStatus(ReservationStatus.PAID.name());
                     reservation.setUpdatedAt(LocalDateTime.now());
                     return reservationRepository.save(reservation)
-                            .flatMap(saved -> publishConfirmed(saved, paymentId));
+                            .flatMap(saved -> liveTrackService.onPaymentCompleted(saved.getId())
+                                    .then(publishConfirmed(saved, paymentId)));
                 })
                 .as(txOperator::transactional)
                 .then();
