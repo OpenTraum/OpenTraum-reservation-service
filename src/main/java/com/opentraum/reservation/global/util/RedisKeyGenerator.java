@@ -50,8 +50,8 @@ public class RedisKeyGenerator {
         return String.format("stock:%d:%s", scheduleId, grade);
     }
 
-    public static String seatPoolKey(Long scheduleId, String zone) {
-        return String.format("seat-pool:%d:%s", scheduleId, zone);
+    public static String seatsKey(Long scheduleId, String zone) {
+        return String.format("seats:%d:%s", scheduleId, zone);
     }
 
     public static String holdKey(Long scheduleId, String zone, String seatNumber) {

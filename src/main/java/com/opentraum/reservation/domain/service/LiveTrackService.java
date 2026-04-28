@@ -58,6 +58,7 @@ public class LiveTrackService {
     private final EventServiceClient eventServiceClient;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final OutboxService outboxService;
+    private final SeatPoolService seatPoolService;
 
     // 좌석 선택 (라이브 트랙). 플로우: 등급 선택 → 구역 선택 → 좌석 선택
     public Mono<SeatSelectionResponse> selectSeat(Long scheduleId, SeatSelectionRequest request, Long userId) {
@@ -268,26 +269,25 @@ public class LiveTrackService {
     }
 
     /**
-     * 한 구역의 선택 가능 좌석 번호 목록.
-     *
-     * <p>Wave 3: event-service에 "구역별 AVAILABLE 좌석 목록" 조회 API가 아직 없다.
-     * 현재는 등급·구역 검증만 수행하고 빈 목록을 반환한다. 프론트엔드는 좌석 맵 UI에서
-     * 전체 배치를 보여주고 클릭 시점에 {@link #selectSeat}의 event-service 조회로
-     * AVAILABLE 여부를 확인한다. 추후 event-service에 해당 API 추가 시 연결한다.
+     * 등급-구역 검증 후 공유 Redis 좌석 풀(seats:{scheduleId}:{zone})에서 잔여 좌석 번호 목록을 조회한다.
      */
     public Mono<List<String>> getAvailableSeats(Long scheduleId, String grade, String zone) {
         return eventServiceClient.validateGradeAndZone(scheduleId, grade, zone)
-                .thenReturn(List.of());
+                .then(seatPoolService.getAvailableSeats(scheduleId, zone).collectList());
     }
 
-    // 잔여석 존재 여부: event-service 잔여석 API 부재로 큐 마감 플래그만 확인
+    // 잔여석 존재 여부: 좌석 풀 전체 합산이 0보다 큰지 확인
     public Mono<Boolean> hasRemainingSeats(Long scheduleId) {
-        return isLiveTrackClosedByQueue(scheduleId).map(closed -> !closed);
+        return seatPoolService.getRemainingSeatsTotal(scheduleId)
+                .map(total -> total > 0);
     }
 
-    // 라이브 트랙 오픈 여부
+    // 라이브 트랙 오픈 여부: 잔여 좌석 + 큐 마감 플래그 둘 다 OK
     public Mono<Boolean> isLiveTrackOpen(Long scheduleId) {
-        return isLiveTrackClosedByQueue(scheduleId).map(closed -> !closed);
+        return hasRemainingSeats(scheduleId)
+                .flatMap(hasSeats -> hasSeats
+                        ? isLiveTrackClosedByQueue(scheduleId).map(closed -> !closed)
+                        : Mono.just(false));
     }
 
     public Mono<Boolean> isLiveTrackClosedByQueue(Long scheduleId) {
