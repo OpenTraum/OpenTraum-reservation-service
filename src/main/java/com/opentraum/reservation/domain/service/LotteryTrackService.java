@@ -170,13 +170,32 @@ public class LotteryTrackService {
     public Mono<Void> onPaymentCompleted(Long reservationId, Long userId, Long scheduleId) {
         String lotteryPaidKey = RedisKeyGenerator.lotteryPaidKey(scheduleId);
         return reservationRepository.findById(reservationId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESERVATION_NOT_FOUND)))
                 .flatMap(reservation -> {
+                    if (!TrackType.LOTTERY.name().equals(reservation.getTrackType())) {
+                        log.warn("seat-assignment ignored for non-lottery reservation: reservationId={}, track={}",
+                                reservationId, reservation.getTrackType());
+                        return Mono.<Reservation>empty();
+                    }
+                    String status = reservation.getStatus();
+                    if (ReservationStatus.PAID_PENDING_SEAT.name().equals(status)
+                            || ReservationStatus.ASSIGNED.name().equals(status)) {
+                        return Mono.just(reservation);
+                    }
+                    if (ReservationStatus.CANCELLED.name().equals(status)
+                            || ReservationStatus.REFUNDED.name().equals(status)) {
+                        log.warn("seat-assignment ignored for closed reservation: reservationId={}, status={}",
+                                reservationId, status);
+                        return Mono.<Reservation>empty();
+                    }
                     reservation.setStatus(ReservationStatus.PAID_PENDING_SEAT.name());
                     reservation.setUpdatedAt(LocalDateTime.now());
                     return reservationRepository.save(reservation);
                 })
-                .then(redisTemplate.opsForSet().add(lotteryPaidKey, userId.toString()))
-                .doOnSuccess(v -> log.info("추첨 결제 완료: reservationId={}, userId={}", reservationId, userId))
+                .flatMap(reservation -> redisTemplate.opsForSet()
+                        .add(lotteryPaidKey, userId.toString())
+                        .thenReturn(reservation))
+                .doOnNext(v -> log.info("추첨 결제 완료: reservationId={}, userId={}", reservationId, userId))
                 .then();
     }
 
