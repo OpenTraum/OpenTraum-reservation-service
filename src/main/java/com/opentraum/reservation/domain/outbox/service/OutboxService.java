@@ -4,10 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opentraum.reservation.domain.outbox.entity.OutboxEvent;
 import com.opentraum.reservation.domain.outbox.repository.OutboxRepository;
-import io.micrometer.tracing.Span;
-import io.micrometer.tracing.Tracer;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -36,14 +33,11 @@ public class OutboxService {
 
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
-    private final Tracer tracer;
 
     public OutboxService(OutboxRepository outboxRepository,
-                         ObjectMapper objectMapper,
-                         @Autowired(required = false) Tracer tracer) {
+                         ObjectMapper objectMapper) {
         this.outboxRepository = outboxRepository;
         this.objectMapper = objectMapper;
-        this.tracer = tracer;
     }
 
     /**
@@ -64,7 +58,6 @@ public class OutboxService {
             Map<String, Object> payload
     ) {
         LocalDateTime now = LocalDateTime.now();
-        String traceId = currentTraceId();
 
         Map<String, Object> enriched = new HashMap<>();
         if (payload != null) {
@@ -73,9 +66,6 @@ public class OutboxService {
         enriched.put("saga_id", sagaId);
         enriched.put("reservation_id", aggregateId);
         enriched.put("occurred_at", now.atOffset(ZoneOffset.UTC).format(ISO_MILLIS));
-        if (traceId != null) {
-            enriched.put("trace_id", traceId);
-        }
 
         String payloadJson;
         try {
@@ -91,22 +81,13 @@ public class OutboxService {
                 .aggregateType(aggregateType)
                 .eventType(eventType)
                 .sagaId(sagaId)
-                .traceId(traceId)
                 .payload(payloadJson)
                 .occurredAt(now)
                 .build();
 
         return outboxRepository.save(event)
                 .doOnSuccess(saved -> log.debug(
-                        "Outbox 이벤트 저장 완료: eventId={}, eventType={}, sagaId={}, aggregateId={}, traceId={}",
-                        saved.getEventId(), saved.getEventType(), saved.getSagaId(), saved.getAggregateId(), saved.getTraceId()));
-    }
-
-    private String currentTraceId() {
-        if (tracer == null) {
-            return null;
-        }
-        Span span = tracer.currentSpan();
-        return span != null ? span.context().traceId() : null;
+                        "Outbox 이벤트 저장 완료: eventId={}, eventType={}, sagaId={}, aggregateId={}",
+                        saved.getEventId(), saved.getEventType(), saved.getSagaId(), saved.getAggregateId()));
     }
 }

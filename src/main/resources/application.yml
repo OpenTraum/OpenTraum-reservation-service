@@ -49,7 +49,7 @@ spring:
       mode: always
       schema-locations: classpath:schema.sql
 
-# Actuator + Prometheus + Tracing
+# Actuator + Prometheus
 management:
   endpoints:
     web:
@@ -61,14 +61,6 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
-  tracing:
-    sampling:
-      probability: 1.0
-    propagation:
-      type: w3c
-  otlp:
-    tracing:
-      endpoint: ${OTLP_TRACING_ENDPOINT:http://alloy.monitoring:4318/v1/traces}
 
 # Queue Properties
 opentraum:
@@ -98,5 +90,3 @@ logging:
     com.opentraum.reservation: DEBUG
     org.springframework.r2dbc: DEBUG
     org.springframework.data.redis: DEBUG
-  pattern:
-    level: "%5p [${spring.application.name:reservation-service},%X{traceId:-},%X{spanId:-}]"

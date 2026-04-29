@@ -42,7 +42,6 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     aggregate_type VARCHAR(64) NOT NULL,
     event_type VARCHAR(64) NOT NULL,
     saga_id CHAR(36) NOT NULL,
-    trace_id CHAR(32),
     payload JSON NOT NULL,
     occurred_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     INDEX idx_outbox_aggregate (aggregate_type, aggregate_id),

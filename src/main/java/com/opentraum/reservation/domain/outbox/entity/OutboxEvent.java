@@ -44,9 +44,6 @@ public class OutboxEvent {
     @Column("saga_id")
     private String sagaId;
 
-    @Column("trace_id")
-    private String traceId;
-
     private String payload;
 
     @Column("occurred_at")
