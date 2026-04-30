@@ -33,6 +33,9 @@ jobs:
       - name: Amazon ECR 로그인
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: QEMU 설정
+        uses: docker/setup-qemu-action@v3
+
       - name: Docker Buildx 설정
         uses: docker/setup-buildx-action@v3
 
@@ -42,7 +45,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
