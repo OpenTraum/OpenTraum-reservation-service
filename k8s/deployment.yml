@@ -23,8 +23,6 @@ spec:
         app.kubernetes.io/component: reservation
     spec:
       terminationGracePeriodSeconds: 40
-      imagePullSecrets:
-        - name: harbor-secret
       priorityClassName: opentraum-high
       affinity:
         podAffinity:
@@ -78,7 +76,7 @@ spec:
               memory: 32Mi
       containers:
         - name: reservation-service
-          image: amdp-registry.skala-ai.com/skala26a-cloud/opentraum-reservation-service:b4b74ce6bbfa457a09ed42689289e608542dd2dc
+          image: 881490135253.dkr.ecr.ap-northeast-2.amazonaws.com/skala3-cloud1-team8-opentraum-reservation-service:b4b74ce6bbfa457a09ed42689289e608542dd2dc
           imagePullPolicy: Always
           ports:
             - containerPort: 8084

@@ -7,6 +7,11 @@ on:
 permissions:
   contents: write
 
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REGISTRY: 881490135253.dkr.ecr.ap-northeast-2.amazonaws.com
+  ECR_REPOSITORY: skala3-cloud1-team8-opentraum-reservation-service
+
 jobs:
   build_image:
 
@@ -18,18 +23,18 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: QEMU 설정
-        uses: docker/setup-qemu-action@v3
+      - name: AWS 자격증명 설정
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Amazon ECR 로그인
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Docker Buildx 설정
         uses: docker/setup-buildx-action@v3
-
-      - name: Harbor 로그인
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.HARBOR_REGISTRY }}
-          username: ${{ secrets.HARBOR_USERNAME }}
-          password: ${{ secrets.HARBOR_PASSWORD }}
 
       - name: Docker 이미지 빌드 및 푸시
         uses: docker/build-push-action@v5
@@ -37,8 +42,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}
+          platforms: linux/amd64
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -46,6 +51,9 @@ jobs:
 
     needs: build_image
     runs-on: ubuntu-latest
+    env:
+      ECR_REGISTRY: 881490135253.dkr.ecr.ap-northeast-2.amazonaws.com
+      ECR_REPOSITORY: skala3-cloud1-team8-opentraum-reservation-service
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
@@ -60,7 +68,7 @@ jobs:
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/OpenTraum/OpenTraum-reservation-service.git
           git fetch origin main
           git checkout main
-          sed -i "s|image: .*opentraum-reservation-service.*|image: ${{ secrets.HARBOR_REGISTRY }}/skala26a-cloud/opentraum-reservation-service:${{ github.sha }}|" k8s/deployment.yml
+          sed -i "s|image: .*opentraum-reservation-service.*|image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${{ github.sha }}|" k8s/deployment.yml
           git add k8s/deployment.yml
           if git diff --cached --quiet; then
             exit 0
