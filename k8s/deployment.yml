@@ -76,7 +76,7 @@ spec:
               memory: 32Mi
       containers:
         - name: reservation-service
-          image: 881490135253.dkr.ecr.ap-northeast-2.amazonaws.com/skala3-cloud1-team8-opentraum-reservation-service:c0ccfd93b9d25e033fee8e9277089aec7c16ea22
+          image: 881490135253.dkr.ecr.ap-northeast-2.amazonaws.com/skala3-cloud1-team8-opentraum-reservation-service:33f43e534b50a172e4ff516d88d3b6e451b8567a
           imagePullPolicy: Always
           ports:
             - containerPort: 8084
