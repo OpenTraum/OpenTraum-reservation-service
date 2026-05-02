@@ -58,7 +58,7 @@ spec:
               app.kubernetes.io/part-of: opentraum
       containers:
         - name: reservation-service
-          image: 881490135253.dkr.ecr.ap-northeast-2.amazonaws.com/skala3-cloud1-team8-opentraum-reservation-service:33f43e534b50a172e4ff516d88d3b6e451b8567a
+          image: 881490135253.dkr.ecr.ap-northeast-2.amazonaws.com/skala3-cloud1-team8-opentraum-reservation-service:44c104bd9f56c9e5f764a80e61a8a400acbaf094
           imagePullPolicy: Always
           ports:
             - containerPort: 8084
